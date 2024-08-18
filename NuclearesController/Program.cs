@@ -73,7 +73,8 @@ internal class Program
 
             //var energyToCoreTempPid = new PID(0.00005, 0.0001, 0.02, targetCoreTemp, false, (170, 450));
             //var coreTempToRodsPid = new PID(0.01, 0.01, 0, rodStartPercentage, true, (0, 100));
-            OPMode opMode = OPMode.Shutdown;
+            OPMode currOpMode = OPMode.Shutdown;
+            OPMode lastOpMode = currOpMode;
             while (true)
             {
                 await WaitForNextTimeStepAsync();
@@ -82,10 +83,16 @@ internal class Program
                 var reactivityzerobased = await GetVariableAsync<float>("CORE_STATE_CRITICALITY");
                 var opModeSelStr = await GetVariableAsync<string>("OPERATION_MODE");
                 if (opModeSelStr == "SHUTDOWN")
-                    opMode = OPMode.Shutdown;
+                    currOpMode = OPMode.Shutdown;
                 else
-                    opMode = coreTempCurrent > 50 ? OPMode.Normal : OPMode.Startup;
-                var opModeIsShutdown = opMode == OPMode.Shutdown;
+                    currOpMode = coreTempCurrent > 100 ? OPMode.Normal : OPMode.Startup;
+                var opModeIsShutdown = currOpMode == OPMode.Shutdown;
+
+                if (lastOpMode != currOpMode)
+                {
+                    lastOpMode = currOpMode;
+                    coreTempToRodsPid.Reset(await GetVariableAsync<float>("RODS_POS_ACTUAL"));
+                }
 
                 SetVariable("RODS_POS_ORDERED", coreTempToRodsPid.Step(currentTimestamp, desiredCoreTemp, coreTempCurrent, reactivityzerobased));
                 for (int i = 0; i < 3; i++)
@@ -96,7 +103,7 @@ internal class Program
 
                 var condenserTempCurrent = await GetVariableAsync<float>("CONDENSER_TEMPERATURE");
                 var newCondenserSpeed = condenserPumpSpeedPid.Step(currentTimestamp, desiredCondenserTemp, condenserTempCurrent);
-                if (opMode == OPMode.Normal)
+                if (currOpMode == OPMode.Normal)
                     newCondenserSpeed = Math.Max(1, newCondenserSpeed);
                 SetVariable("CONDENSER_CIRCULATION_PUMP_ORDERED_SPEED", newCondenserSpeed.ToString("N2"));
 
@@ -107,7 +114,7 @@ internal class Program
                     SetVariable("FREIGHT_PUMP_CONDENSER_ACTIVE", false);
 
 
-                if (opMode is OPMode.Shutdown or OPMode.Startup)
+                if (currOpMode is OPMode.Shutdown or OPMode.Startup)
                 {
                     variablesToSet.Remove("RODS_POS_ORDERED");
                 }
@@ -119,7 +126,7 @@ internal class Program
 
                 Console.SetCursorPosition(0, 0);
                 Console.WriteLine("Cool reactor controller :)))))\n");
-                Console.WriteLine($"OPERATION MODE: {opModeSelStr} --> {opMode.ToString().ToUpperInvariant()}          ");
+                Console.WriteLine($"OPERATION MODE: {opModeSelStr} --> {currOpMode.ToString().ToUpperInvariant()}          ");
                 if (variablesToSet.ContainsKey("RODS_POS_ORDERED"))
                     Console.WriteLine($"New rod level: {variablesToSet["RODS_POS_ORDERED"]}" + padright);
                 Console.WriteLine($"Ordered secondary pumpspeeds A/B/C: {string.Join('/', Enumerable.Range(0, 3).Select(i => variablesToSet[$"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED"]))}" + "      ");

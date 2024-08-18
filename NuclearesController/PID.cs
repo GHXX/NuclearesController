@@ -73,4 +73,9 @@ internal class PID
     }
 
     public double[] GetPIDComponents() => [this.lastVals.Item1, this.lastVals.Item2, this.lastVals.Item3];
+
+    internal void Reset(float targetI)
+    {
+        this.integratorValue = targetI;
+    }
 }
