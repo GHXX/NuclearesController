@@ -94,7 +94,18 @@ internal class Program
                     coreTempToRodsPid.Reset(await GetVariableAsync<float>("RODS_POS_ACTUAL"));
                 }
 
-                SetVariable("RODS_POS_ORDERED", coreTempToRodsPid.Step(currentTimestamp, desiredCoreTemp, coreTempCurrent, reactivityzerobased));
+                float actualDesiredCoreTemp;
+                bool actualDesiredCoreTempReactivityLimited;
+                if (Math.Abs(reactivityzerobased) < 1)
+                {
+                    (actualDesiredCoreTemp, actualDesiredCoreTempReactivityLimited) = (desiredCoreTemp, false);
+                }
+                else
+                {
+                    var newTemp = desiredCoreTemp - 500 * Math.Sign(reactivityzerobased);
+                    (actualDesiredCoreTemp, actualDesiredCoreTempReactivityLimited) = (newTemp, true);
+                }
+                SetVariable("RODS_POS_ORDERED", coreTempToRodsPid.Step(currentTimestamp, actualDesiredCoreTemp, coreTempCurrent, reactivityzerobased));
                 for (int i = 0; i < 3; i++)
                 {
                     var currSecCoolant = await GetVariableAsync<float>($"COOLANT_SEC_{i}_VOLUME");
@@ -128,9 +139,17 @@ internal class Program
                 Console.WriteLine("Cool reactor controller :)))))\n");
                 Console.WriteLine($"OPERATION MODE: {opModeSelStr} --> {currOpMode.ToString().ToUpperInvariant()}          ");
                 if (variablesToSet.ContainsKey("RODS_POS_ORDERED"))
+                {
                     Console.WriteLine($"New rod level: {variablesToSet["RODS_POS_ORDERED"]}" + padright);
+                    if (actualDesiredCoreTempReactivityLimited)
+                    {
+                        Console.WriteLine("Large reactivity change detected. Slowing rod movement.");
+                    }
+                }
                 Console.WriteLine($"Ordered secondary pumpspeeds A/B/C: {string.Join('/', Enumerable.Range(0, 3).Select(i => variablesToSet[$"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED"]))}" + "      ");
                 Console.WriteLine($"Ordered condenser speed: {variablesToSet["CONDENSER_CIRCULATION_PUMP_ORDERED_SPEED"]}" + padright);
+                Console.WriteLine(padright + padright + padright);
+                Console.WriteLine(padright + padright + padright);
                 Console.WriteLine(padright + padright + padright);
                 Console.SetCursorPosition(0, 0);
             }
