@@ -85,6 +85,9 @@ internal class Program
             const float targetSecondaryLevel = 3500f;
             var secondaryLevelPids = Enumerable.Range(0, 3).Select(async i => new PID(0.0005, 0.01, 0, await GetVariableAsync<float>($"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED"), false, (0, 100))).Select(x => x.Result).ToArray();
 
+            const float targetSteamGenTemp = 250f;
+            var primaryLevelPids = Enumerable.Range(0, 3).Select(async i => new PID(0.0005, 0.001, 0.05, await GetVariableAsync<float>($"COOLANT_CORE_CIRCULATION_PUMP_{i}_ORDERED_SPEED"), false, (0, 100))).Select(x => x.Result).ToArray();
+
             const float desiredCondenserTemp = 65f;
             var condenserPumpSpeedPid = new PID(0.00005, 0.05, 0.01, await GetVariableAsync<float>("CONDENSER_CIRCULATION_PUMP_ORDERED_SPEED"), true, (0, 100));
 
@@ -130,6 +133,17 @@ internal class Program
                 {
                     var currSecCoolant = await GetVariableAsync<float>($"COOLANT_SEC_{i}_VOLUME");
                     SetVariable($"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED", secondaryLevelPids[i].Step(currentTimestamp, targetSecondaryLevel, currSecCoolant).ToString("N2"));
+
+                    if (i == 1)
+                    {
+                        var actual = await GetVariableAsync<int>($"COOLANT_CORE_CIRCULATION_PUMP_{i}_ORDERED_SPEED");
+                        var isOn = Math.Abs(await GetVariableAsync<int>($"COOLANT_CORE_CIRCULATION_PUMP_{i}_SPEED") - actual) < 5;
+                        var steamGenTemp = await GetVariableAsync<float>($"COOLANT_SEC_{i}_TEMPERATURE");
+                        if (isOn)
+                            SetVariable($"COOLANT_PRIM_CIRCULATION_PUMP_{i}_ORDERED_SPEED", primaryLevelPids[i].Step(currentTimestamp, targetSteamGenTemp, steamGenTemp).ToString("N2"));
+                        else
+                            primaryLevelPids[i].Reset(actual);
+                    }
                 }
 
                 var condenserTempCurrent = await GetVariableAsync<float>("CONDENSER_TEMPERATURE");
