@@ -7,6 +7,26 @@ internal class Program
     private const int PORT = 8785;
     private static readonly TimeSpan requestTimeout = TimeSpan.FromSeconds(2);
     private static HttpClient hc = new HttpClient() { BaseAddress = new($"http://localhost:{PORT}/") };
+    private static readonly object logObj = new();
+    public static void Log(string msg, LogLevel level)
+    {
+        lock (logObj)
+        {
+            var fg = Console.ForegroundColor;
+            Console.ForegroundColor = level switch
+            {
+                LogLevel.Info => ConsoleColor.White,
+                LogLevel.Warning => ConsoleColor.Yellow,
+                LogLevel.Error => ConsoleColor.Red,
+                _ => throw new NotImplementedException(),
+            };
+            Console.WriteLine(msg);
+            Console.ForegroundColor = fg;
+        }
+    }
+    public static void Info(string msg) => Log(msg, LogLevel.Info);
+    public static void Warn(string msg) => Log(msg, LogLevel.Warning);
+    public static void Error(string msg) => Log(msg, LogLevel.Error);
 
     public static async Task<string> GetVariableRawAsync(string varname) => await hc.GetStringAsync($"?variable={varname}", new CancellationTokenSource(requestTimeout).Token);
     public static async Task<T> GetVariableAsync<T>(string varname) where T : IParsable<T> => T.Parse((await GetVariableRawAsync(varname)).Replace(",", "."), null);
@@ -143,7 +163,7 @@ internal class Program
                     Console.WriteLine($"New rod level: {variablesToSet["RODS_POS_ORDERED"]}" + padright);
                     if (actualDesiredCoreTempReactivityLimited)
                     {
-                        Console.WriteLine("Large reactivity change detected. Slowing rod movement.");
+                        Warn("Large reactivity change detected. Slowing rod movement.");
                     }
                 }
                 Console.WriteLine($"Ordered secondary pumpspeeds A/B/C: {string.Join('/', Enumerable.Range(0, 3).Select(i => variablesToSet[$"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED"]))}" + "      ");
