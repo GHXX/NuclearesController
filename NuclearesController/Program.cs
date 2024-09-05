@@ -1,4 +1,5 @@
 ﻿using System.Globalization;
+using System.Text;
 
 namespace NuclearesController;
 
@@ -29,11 +30,28 @@ internal class Program
     public static void Error(string msg) => Log(msg, LogLevel.Error);
 
     public static async Task<string> GetVariableRawAsync(string varname) => await hc.GetStringAsync($"?variable={varname}", new CancellationTokenSource(requestTimeout).Token);
-    public static async Task<T> GetVariableAsync<T>(string varname) where T : IParsable<T> => T.Parse((await GetVariableRawAsync(varname)).Replace(",", "."), null);
+    public static Dictionary<string, object> varCache = [];
+    public static async Task<T> GetVariableAsync<T>(string varname) where T : IParsable<T>
+    {
+        if (!varname.Equals("TIME_STAMP", StringComparison.InvariantCultureIgnoreCase) && varCache.TryGetValue(varname, out var rv))
+            return (T)rv;
+
+        var rv2 = T.Parse((await GetVariableRawAsync(varname)).Replace(",", "."), null);
+        varCache[varname] = rv2;
+        return rv2;
+    }
 
     public static async Task SetVariableAsync(string varname, object value) => await hc.PostAsync($"?variable={varname}&value={value}", null);
 
     private static int currentTimestamp = 0;
+    internal static readonly string[] generatorVariables = [.. Enumerable.Range(0, 3).Select(x => $"GENERATOR_{x}_KW")];
+    internal static readonly string[] secLevelVariables = [.. Enumerable.Range(0, 3).Select(x => $"COOLANT_SEC_{x}_VOLUME")];
+    internal static readonly string[] primaryPumpSpeedVariables = [.. Enumerable.Range(0, 3).Select(x => $"COOLANT_CORE_CIRCULATION_PUMP_{x}_SPEED")];
+
+    internal static readonly string[] observedVariables = ["CORE_TEMP","RODS_POS_ORDERED", "AUX_IODINE_GENERATION", "AUX_IODINE_CUMULATIVE", "AUX_XENON_GENERATION",
+        "AUX_XENON_CUMULATIVE", "AUX_FACTOR", ..generatorVariables,..secLevelVariables];
+    internal static readonly string[] deltaVariablesToObserve = ["CORE_TEMP", "RODS_POS_ORDERED", "AUX_IODINE_GENERATION", "AUX_FACTOR", .. generatorVariables, .. secLevelVariables];
+    internal static readonly string[] variablesToPaste = ["AUX_FACTOR", .. generatorVariables, .. primaryPumpSpeedVariables];
 
     private static async Task WaitForNextTimeStepAsync()
     {
@@ -57,6 +75,8 @@ internal class Program
         var c = new CultureInfo("en-US");
         c.NumberFormat.NumberGroupSeparator = " ";
         Thread.CurrentThread.CurrentCulture = Thread.CurrentThread.CurrentCulture = c;
+        var origConsoleColor = Console.ForegroundColor;
+        Console.OutputEncoding = Encoding.Default;
 
     restart:
         try
@@ -80,7 +100,7 @@ internal class Program
             double targetCoreTemp = await GetVariableAsync<float>("CORE_TEMP");
             const float desiredCoreTemp = 360f;
             double rodStartPercentage = await GetVariableAsync<float>("RODS_POS_ACTUAL");
-            var coreTempToRodsPid = new PID(0.075, 0.01, 0, rodStartPercentage, true, (0, 100));
+            var coreTempToRodsPid = new PID(0.5, 0.075, 0.5, rodStartPercentage, true, (0, 100));
 
             const float targetSecondaryLevel = 3500f;
             var secondaryLevelPids = Enumerable.Range(0, 3).Select(async i => new PID(0.0005, 0.005, 0, await GetVariableAsync<float>($"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED"), false, (0, 100))).Select(x => x.Result).ToArray();
@@ -94,6 +114,16 @@ internal class Program
             const float desiredCondenserLevelMin = 26_000f;
             const float desiredCondenserLevelMax = 29_000f;
 
+            async Task<Dictionary<string, float>> GetDeltaPrecursorDictAsync()
+            {
+                var rv = new Dictionary<string, float>();
+                foreach (var dv in deltaVariablesToObserve)
+                    rv[dv] = await GetVariableAsync<float>(dv);
+                return rv;
+            }
+
+            var deltaHandler = new DeltaDictHelper<float>(await GetDeltaPrecursorDictAsync());
+
             //var energyToCoreTempPid = new PID(0.00005, 0.0001, 0.02, targetCoreTemp, false, (170, 450));
             //var coreTempToRodsPid = new PID(0.01, 0.01, 0, rodStartPercentage, true, (0, 100));
             OPMode currOpMode = OPMode.Shutdown;
@@ -101,6 +131,7 @@ internal class Program
             while (true)
             {
                 await WaitForNextTimeStepAsync();
+                varCache.Clear();
                 variablesToSet.Clear();
                 var coreTempCurrent = await GetVariableAsync<float>("CORE_TEMP");
                 var reactivityzerobased = await GetVariableAsync<float>("CORE_STATE_CRITICALITY");
@@ -164,6 +195,8 @@ internal class Program
                     variablesToSet.Remove("RODS_POS_ORDERED");
                 }
 
+                var deltaDict = deltaHandler.Tick(await GetDeltaPrecursorDictAsync());
+
                 foreach (var (k, v) in variablesToSet)
                 {
                     await SetVariableAsync(k, v);
@@ -183,10 +216,21 @@ internal class Program
                 }
                 Console.WriteLine($"Ordered secondary pumpspeeds A/B/C: {string.Join('/', Enumerable.Range(0, 3).Select(i => variablesToSet[$"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED"]))}" + "      ");
                 Console.WriteLine($"Ordered condenser speed: {variablesToSet["CONDENSER_CIRCULATION_PUMP_ORDERED_SPEED"]}" + padright);
+                Console.WriteLine("Additional variables:\n" + dictToString(observedVariables.ToDictionary(x => x, x => GetVariableAsync<float>(x).Result)));
+                Console.WriteLine(padright + padright + padright);
+                var ctReached = Math.Abs(coreTempCurrent - targetCoreTemp) < 1 && Math.Abs(reactivityzerobased) < 0.5;
+                Console.ForegroundColor = ctReached ? ConsoleColor.Green : ConsoleColor.Yellow;
+                Console.WriteLine($"CORE TEMP REACHED? {ctReached} ");
+                Console.ForegroundColor = origConsoleColor;
+                Console.WriteLine("Observed variable deltas:\n" + dictToString(deltaDict.ToDictionary(x => "\u0394" + x.Key, x => x.Value)));
+                Console.WriteLine(padright + padright + padright);
+                Console.WriteLine("Excel paste string:\n" + variablesToPaste.Select(x => GetVariableAsync<float>(x).Result.ToString().Replace(",", "").Replace('.', ',') + " ").JoinByDelim(" "));
                 Console.WriteLine(padright + padright + padright);
                 Console.WriteLine(padright + padright + padright);
                 Console.WriteLine(padright + padright + padright);
                 Console.SetCursorPosition(0, 0);
+
+                string dictToString(Dictionary<string, float> d) => d.Select(x => $"{x.Key.PadRight(d.Max(x => x.Key.Length) + 1)} {x.Value,11:N5}").JoinByDelim("\n");
             }
         }
         catch (Exception ex)
