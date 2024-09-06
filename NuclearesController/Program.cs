@@ -103,7 +103,7 @@ internal class Program
             var coreTempToRodsPid = new PID(0.5, 0.075, 0.5, rodStartPercentage, true, (0, 100));
 
             const float targetSecondaryLevel = 3500f;
-            var secondaryLevelPids = Enumerable.Range(0, 3).Select(async i => new PID(0.0005, 0.005, 0, await GetVariableAsync<float>($"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED"), false, (0, 100))).Select(x => x.Result).ToArray();
+            var secondaryLevelPids = Enumerable.Range(0, 3).Select(async i => new PID(0.05, 0.0005, 0, await GetVariableAsync<float>($"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED"), false, (0, 100))).Select(x => x.Result).ToArray();
 
             const float targetSteamGenTemp = 250f;
             var primaryLevelPids = Enumerable.Range(0, 3).Select(async i => new PID(0.0005, 0.001, 0.05, await GetVariableAsync<float>($"COOLANT_CORE_CIRCULATION_PUMP_{i}_ORDERED_SPEED"), false, (0, 100))).Select(x => x.Result).ToArray();
@@ -216,7 +216,7 @@ internal class Program
                 }
                 Console.WriteLine($"Ordered secondary pumpspeeds A/B/C: {string.Join('/', Enumerable.Range(0, 3).Select(i => variablesToSet[$"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED"]))}" + "      ");
                 Console.WriteLine($"Ordered condenser speed: {variablesToSet["CONDENSER_CIRCULATION_PUMP_ORDERED_SPEED"]}" + padright);
-                Console.WriteLine("Additional variables:\n" + dictToString(observedVariables.ToDictionary(x => x, x => GetVariableAsync<float>(x).Result)));
+                Console.WriteLine($"Additional variables:{padright}\n" + dictToString(observedVariables.ToDictionary(x => x, x => GetVariableAsync<float>(x).Result)));
                 Console.WriteLine(padright + padright + padright);
                 var ctReached = Math.Abs(coreTempCurrent - targetCoreTemp) < 1 && Math.Abs(reactivityzerobased) < 0.5;
                 Console.ForegroundColor = ctReached ? ConsoleColor.Green : ConsoleColor.Yellow;
@@ -224,7 +224,7 @@ internal class Program
                 Console.ForegroundColor = origConsoleColor;
                 Console.WriteLine("Observed variable deltas:\n" + dictToString(deltaDict.ToDictionary(x => "\u0394" + x.Key, x => x.Value)));
                 Console.WriteLine(padright + padright + padright);
-                Console.WriteLine("Excel paste string:\n" + variablesToPaste.Select(x => GetVariableAsync<float>(x).Result.ToString().Replace(",", "").Replace('.', ',') + " ").JoinByDelim(" "));
+                Console.WriteLine("Excel paste string:\n" + variablesToPaste.Select(x => GetVariableAsync<float>(x).Result.ToString().Replace(",", "").Replace('.', ',') + " ").JoinByDelim(" ") + padright);
                 Console.WriteLine(padright + padright + padright);
                 Console.WriteLine(padright + padright + padright);
                 Console.WriteLine(padright + padright + padright);
