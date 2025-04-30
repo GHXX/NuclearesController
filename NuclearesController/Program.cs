@@ -10,7 +10,7 @@ internal class Program {
     private static readonly object logObj = new();
 
     private const float desiredCoreTemp = 400;
-    private const double maxTargetReactivity = 2;
+    private const double maxTargetReactivity = 1;
     private const double reactivitySlopeLengthDegrees = 25;
     public static void Log(string msg, LogLevel level) {
         lock (logObj) {
@@ -99,7 +99,10 @@ internal class Program {
 
             double targetCoreTemp = await GetVariableAsync<float>("CORE_TEMP");
             double rodStartPercentage = await GetVariableAsync<float>("RODS_POS_ACTUAL");
-            var reactivityToRodsPid = new PID(1.5, 0.1, 0, rodStartPercentage, true, (0, 100));
+            var reactivityToRodsPid = new PID(1.5/4, 0.1/4, 0, rodStartPercentage, true, (0, 100));
+
+            string[] coreReactivityRelevantVars = ["CORE_TEMP", "RODS_POS_ACTUAL", .. primaryPumpSpeedVariables, "CORE_IODINE_CUMULATIVE", "CORE_XENON_CUMULATIVE", "CORE_FACTOR"];
+            var reactivityModel = new MlPlantModel(coreReactivityRelevantVars.Length);
 
             const float targetSecondaryLevel = 35000f;
             var secondaryLevelPids = Enumerable.Range(0, 3).Select(async i => new PID(0.005, 0.00005, 0, await GetVariableAsync<float>($"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED"), false, (0, 100))).Select(x => x.Result).ToArray();
@@ -129,12 +132,14 @@ internal class Program {
             const int setInterval = 4;
             int setIntervalRemaining = 0;
             double lastRodSet = -1000;
+            double[] reactivityModelX = Array.Empty<double>();
             while (true) {
                 await WaitForNextTimeStepAsync();
                 varCache.Clear();
                 variablesToSet.Clear();
                 var coreTempCurrent = await GetVariableAsync<float>("CORE_TEMP");
                 var reactivityzerobased = await GetVariableAsync<float>("CORE_STATE_CRITICALITY");
+                var reactivityzerobasedOld = await GetVariableAsync<float>("CORE_THERMAL_SURPLUS");
                 var opModeSelStr = await GetVariableAsync<string>("CORE_OPERATION_MODE");
                 if (opModeSelStr == "SHUTDOWN")
                     currOpMode = OPMode.Shutdown;
@@ -146,6 +151,16 @@ internal class Program {
                     lastOpMode = currOpMode;
                     reactivityToRodsPid.Reset(await GetVariableAsync<float>("RODS_POS_ACTUAL"));
                 }
+
+                var estimatedCurrentReactivity = 0d;
+                var r2_reactivity = 0d;
+                if (reactivityModelX.Length > 0) {
+                    estimatedCurrentReactivity = reactivityModel.Evaluate(reactivityModelX);
+                }
+                reactivityModelX = [.. coreReactivityRelevantVars.Select(x => GetVariableAsync<float>(x).Result)]; // store for next time around
+                reactivityModel.AddObservation(reactivityModelX, reactivityzerobasedOld); // train on current X and current reactivity
+                r2_reactivity = reactivityModel.ReFit();
+
 
                 //float actualDesiredCoreTemp = desiredCoreTemp;
                 //bool actualDesiredCoreTempReactivityLimited = false;
@@ -212,6 +227,9 @@ internal class Program {
                 Console.WriteLine($"CORE TEMP REACHED? {ctReached} ");
                 Console.ForegroundColor = origConsoleColor;
                 Console.WriteLine("Observed variable deltas:\n" + dictToString(deltaDict.ToDictionary(x => "\u0394" + x.Key, x => x.Value)));
+                Console.WriteLine(padright + padright + padright);
+                Console.WriteLine($"ML Reactivity fit r²: {r2_reactivity}");
+                Console.WriteLine($"ML Reactivity estimate: {estimatedCurrentReactivity}, actual: {reactivityzerobasedOld}; Params: {reactivityModel.KPs.Select(x => x.ToString("N3")).JoinByDelim(" ")}" + padright);
                 Console.WriteLine(padright + padright + padright);
                 //Console.WriteLine("Excel paste string:\n" + variablesToPaste.Select(x => GetVariableAsync<float>(x).Result.ToString().Replace(",", "").Replace('.', ',') + " ").JoinByDelim(" ") + padright);
                 Console.WriteLine(padright + padright + padright);
