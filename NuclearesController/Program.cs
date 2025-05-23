@@ -1,4 +1,5 @@
-﻿using System.Globalization;
+﻿using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text;
 
 namespace NuclearesController;
@@ -29,7 +30,20 @@ internal class Program {
     public static void Warn(string msg) => Log(msg, LogLevel.Warning);
     public static void Error(string msg) => Log(msg, LogLevel.Error);
 
-    public static async Task<string> GetVariableRawAsync(string varname) => await hc.GetStringAsync($"?variable={varname}", new CancellationTokenSource(requestTimeout).Token);
+    private static Dictionary<string, string> rawVarCache = [];
+    public static async Task<string> GetVariableRawAsync(string varname) {
+    retry:
+        try {
+            if (!varname.Equals("TIME_STAMP", StringComparison.InvariantCultureIgnoreCase) && rawVarCache.TryGetValue(varname, out var rv)) return rv;
+            var res = await hc.GetStringAsync($"?variable={varname}", new CancellationTokenSource(requestTimeout).Token);
+            rawVarCache[varname] = res;
+            return res;
+        } catch (TaskCanceledException) {
+            goto retry;
+        }
+    }
+
+    public static ConcurrentBag<string> prefetchCache = [];
     public static Dictionary<string, object> varCache = [];
     public static async Task<T> GetVariableAsync<T>(string varname) where T : IParsable<T> {
         if (!varname.Equals("TIME_STAMP", StringComparison.InvariantCultureIgnoreCase) && varCache.TryGetValue(varname, out var rv))
@@ -40,11 +54,25 @@ internal class Program {
         return rv2;
     }
 
+    public static async Task HttpPrefetchAsync() {
+        await Parallel.ForEachAsync(prefetchCache, async (x, ctok) => {
+            try {
+                await GetVariableAsync<float>(x);
+            } catch (Exception) {
+            }
+        });
+    }
+
     public static async Task SetVariableAsync(string varname, object value) {
         string strVal = (value?.ToString() ?? "null").Replace('.', ',');
-        var resp = await hc.PostAsync($"?variable={varname}&value={strVal}", null);
-        if (!resp.IsSuccessStatusCode) {
-            throw new Exception($"Non success status code for setting variable {varname} to {strVal}");
+    retry:
+        try {
+            var resp = await hc.PostAsync($"?variable={varname}&value={strVal}", null);
+            if (!resp.IsSuccessStatusCode) {
+                throw new Exception($"Non success status code for setting variable {varname} to {strVal}");
+            }
+        } catch (TaskCanceledException) {
+            goto retry;
         }
     }
 
@@ -68,7 +96,7 @@ internal class Program {
 
     private static async Task WaitForWebserverAvailableAsync() {
     retry: // retry marker for from inside catch block
-        try { await hc.GetStringAsync("?variable=CORE_TEMP"); } catch { Console.WriteLine("Waiting for webserver to be online..."); goto retry; }
+        try { await hc.GetStringAsync("?variable=CORE_TEMP"); } catch { Console.WriteLine("Waiting for webserver to be online..."); await Task.Delay(1000); goto retry; }
     }
 
     private static async Task Main(string[] args) {
@@ -117,10 +145,11 @@ internal class Program {
             const float desiredCondenserLevelMax = 250_000f;
 
             async Task<Dictionary<string, float>> GetDeltaPrecursorDictAsync() {
-                var rv = new Dictionary<string, float>();
-                foreach (var dv in deltaVariablesToObserve)
-                    rv[dv] = await GetVariableAsync<float>(dv);
-                return rv;
+                var rv = new ConcurrentDictionary<string, float>();
+                await Parallel.ForEachAsync(deltaVariablesToObserve, async (x, ctok) => rv[x] = await GetVariableAsync<float>(x));
+                //foreach (var dv in deltaVariablesToObserve)
+                //    rv[dv] = await GetVariableAsync<float>(dv);
+                return rv.ToDictionary();
             }
 
             var deltaHandler = new DeltaDictHelper<float>(await GetDeltaPrecursorDictAsync());
@@ -135,8 +164,11 @@ internal class Program {
             double[] reactivityModelX = Array.Empty<double>();
             while (true) {
                 await WaitForNextTimeStepAsync();
+                prefetchCache = [.. varCache.Keys];
+                rawVarCache.Clear();
                 varCache.Clear();
                 variablesToSet.Clear();
+                await HttpPrefetchAsync();
                 var coreTempCurrent = await GetVariableAsync<float>("CORE_TEMP");
                 var reactivityzerobased = await GetVariableAsync<float>("CORE_STATE_CRITICALITY");
                 var coreFactorOld = await GetVariableAsync<float>("CORE_FACTOR");
@@ -173,8 +205,8 @@ internal class Program {
                 var coreTempError = coreTempCurrent - desiredCoreTemp;
                 //var desiredReactivity = Math.CopySign(Math.Clamp(Math.Log(Math.Cosh(Math.Abs(coreTempError/(reactivitySlopeLengthDegrees/2)))) * coshCorrectionFactor, 0, maxTargetReactivity), -coreTempError);
                 var desiredReactivity = Math.Clamp(-coreTempError, -reactivitySlopeLengthDegrees, reactivitySlopeLengthDegrees) / reactivitySlopeLengthDegrees * maxTargetReactivity;
-                var newRodsPos = reactivityToRodsPid.Step(currentTimestamp, desiredReactivity, reactivityzerobased);
-                SetVariable("RODS_ALL_POS_ORDERED", newRodsPos);
+                        var newRodsPos = reactivityToRodsPid.Step(currentTimestamp, desiredReactivity, reactivityzerobased);
+                        SetVariable("RODS_ALL_POS_ORDERED", newRodsPos);
                 for (int i = 0; i < 0; i++) {
                     var currSecCoolant = await GetVariableAsync<float>($"COOLANT_SEC_{i}_VOLUME");
                     SetVariable($"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED", secondaryLevelPids[i].Step(currentTimestamp, targetSecondaryLevel, currSecCoolant).ToString("N2"));
@@ -202,9 +234,9 @@ internal class Program {
                 if (true || setIntervalRemaining-- <= 0 || Math.Abs(lastRodSet - newRodsPos) > 0.4) {
                     setIntervalRemaining = setInterval;
                     lastRodSet = newRodsPos;
-                    foreach (var (k, v) in variablesToSet) {
-                        await SetVariableAsync(k, v);
-                    }
+                foreach (var (k, v) in variablesToSet) {
+                    await SetVariableAsync(k, v);
+                }
                 }
 
                 Console.SetCursorPosition(0, 0);
@@ -218,9 +250,9 @@ internal class Program {
                     //    Warn("Large reactivity change detected. Slowing rod movement.");
                     //}
                 }
-                /*Console.WriteLine($"Ordered secondary pumpspeeds A/B/C: {string.Join('/', Enumerable.Range(0, 3).Select(i => variablesToSet[$"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED"]))}" + "      ");
-                Console.WriteLine($"Ordered condenser speed: {variablesToSet["CONDENSER_CIRCULATION_PUMP_ORDERED_SPEED"]}" + padright);*/
-                Console.WriteLine($"Additional variables:{padright}\n" + dictToString(observedVariables.ToDictionary(x => x, x => GetVariableAsync<float>(x).Result)));
+                    /*Console.WriteLine($"Ordered secondary pumpspeeds A/B/C: {string.Join('/', Enumerable.Range(0, 3).Select(i => variablesToSet[$"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED"]))}" + "      ");
+                    Console.WriteLine($"Ordered condenser speed: {variablesToSet["CONDENSER_CIRCULATION_PUMP_ORDERED_SPEED"]}" + padright);*/
+                    Console.WriteLine($"Additional variables:{padright}\n" + dictToString(observedVariables.ToDictionary(x => x, x => GetVariableAsync<float>(x).Result)));
                 Console.WriteLine(padright + padright + padright);
                 var ctReached = Math.Abs(coreTempCurrent - desiredCoreTemp) < 1 && Math.Abs(reactivityzerobased) < 0.5;
                 Console.ForegroundColor = ctReached ? ConsoleColor.Green : ConsoleColor.Yellow;
