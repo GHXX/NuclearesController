@@ -7,6 +7,7 @@ internal class MlPlantModel(int inputCount) {
     private double[] kPs = new double[inputCount + 1]; // first is bias
     public IReadOnlyList<double> KPs => this.kPs;
     public int ObservationCount => this.observations.Count;
+    public int MaxObservationCount => replayBufferLen;
 
     private readonly List<Observation> observations = new(replayBufferLen);
     //private readonly double[] iPs = new double[inputCount];

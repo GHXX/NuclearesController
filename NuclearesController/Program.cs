@@ -284,7 +284,7 @@ internal class Program {
                 Console.ForegroundColor = origConsoleColor;
                 Console.WriteLine("Observed variable deltas:\n" + dictToString(deltaDict.ToDictionary(x => "\u0394" + x.Key, x => x.Value)));
                 Console.WriteLine(padright + padright + padright);
-                Console.WriteLine($"ML Factor fit r²: {r2_coreFactor}  ");
+                Console.WriteLine($"ML Factor fit r²: {r2_coreFactor}; Observation count: {coreFactorModel.ObservationCount}/{coreFactorModel.MaxObservationCount}"+padright);
                 Console.WriteLine($"ML Factor estimate: {estimatedCurrentCoreFactor}, actual: {coreFactorOld}; Params: {coreFactorModel.KPs.Select(x => x.ToString()).JoinByDelim(" ")}" + padright);
                 Console.WriteLine($"ML Ideal rod pos estimate: {(mlEstimatedRodsPos == null ? ($"NONE - Warming Up: {coreFactorModel.ObservationCount}/{factorModelNeededObs}") : ($"{mlEstimatedRodsPos:N2}"))}" + padright);
                 Console.WriteLine(padright + padright + padright);
