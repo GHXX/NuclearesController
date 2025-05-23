@@ -3,9 +3,10 @@ using MathNet.Numerics.LinearAlgebra;
 
 namespace NuclearesController;
 internal class MlPlantModel(int inputCount) {
-    private const int replayBufferLen = 60*24;
+    private const int replayBufferLen = 60 * 12;
     private double[] kPs = new double[inputCount + 1]; // first is bias
     public IReadOnlyList<double> KPs => this.kPs;
+    public int ObservationCount => this.observations.Count;
 
     private readonly List<Observation> observations = new(replayBufferLen);
     //private readonly double[] iPs = new double[inputCount];
@@ -24,6 +25,10 @@ internal class MlPlantModel(int inputCount) {
             Matrix<double>.Build.DenseOfRows([.. this.observations.Select(x => x.Inputs)]).Multiply(Vector<double>.Build.DenseOfArray(this.kPs[1..])) + this.kPs[0],
             y);
         return r2;
+    }
+
+    public double ReverseSolveForX1(double desiredOutput, double[] remainingObservations) {
+        return (desiredOutput - (Vector<double>.Build.DenseOfArray(remainingObservations).DotProduct(Vector<double>.Build.DenseOfArray(this.kPs[2..])) + this.kPs[0])) / this.KPs[1];
     }
 
     public double Evaluate(double[] x) => x.Dot(this.kPs[1..]) + this.kPs[0];
