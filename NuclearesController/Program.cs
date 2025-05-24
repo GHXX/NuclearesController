@@ -11,7 +11,8 @@ internal class Program {
     private static readonly object logObj = new();
 
     private const int factorModelNeededObs = 10;
-    private const float desiredCoreTemp = 360.5f;
+    private const float desiredCoreTemp = 340f;
+    private const float desiredCondenserTemp = 65f;
     private const double maxTargetReactivity = 1;
     private const double reactivitySlopeLengthDegrees = 25;
     public static void Log(string msg, LogLevel level) {
@@ -97,7 +98,7 @@ internal class Program {
 
     private static async Task WaitForWebserverAvailableAsync() {
     retry: // retry marker for from inside catch block
-        try { await hc.GetStringAsync("?variable=CORE_TEMP"); } catch { Console.WriteLine("Waiting for webserver to be online..."); await Task.Delay(1000); goto retry; }
+        try { await hc.GetStringAsync("?variable=CORE_TEMP"); } catch { Console.WriteLine("Waiting for webserver to be online..."); await Task.Delay(5000); goto retry; }
     }
 
     private static async Task Main(string[] args) {
@@ -131,7 +132,7 @@ internal class Program {
             var reactivityToRodsPid = new PID(1.5, 0.1 / 4, 0, rodStartPercentage, true, (0, 100));
             var tempToThermalPid = new PID(0.075, 0.01, 0, 0, false, null);
 
-            string[] coreReactivityRelevantVars = ["RODS_POS_ACTUAL",/*"CORE_TEMP",*/ .. primaryPumpSpeedVariables, "CORE_IODINE_CUMULATIVE", "CORE_XENON_CUMULATIVE"];
+            string[] coreReactivityRelevantVars = ["RODS_POS_ACTUAL",/*"CORE_TEMP",*/ .. primaryPumpSpeedVariables, "CORE_IODINE_CUMULATIVE", "CORE_XENON_CUMULATIVE", "CHEM_BORON_PPM"];
             var coreFactorModel = new MlPlantModel(coreReactivityRelevantVars.Length);
 
             const float targetSecondaryLevel = 35000f;
@@ -140,8 +141,7 @@ internal class Program {
             //const float targetSteamGenTemp = 250f;
             //var primaryLevelPids = Enumerable.Range(0, 3).Select(async i => new PID(0.0005, 0.001, 0.05, await GetVariableAsync<float>($"COOLANT_CORE_CIRCULATION_PUMP_{i}_ORDERED_SPEED"), false, (0, 100))).Select(x => x.Result).ToArray();
 
-            const float desiredCondenserTemp = 28f;
-            var condenserPumpSpeedPid = new PID(0.00005, 0.05, 0.01, await GetVariableAsync<float>("CONDENSER_CIRCULATION_PUMP_ORDERED_SPEED"), true, (0, 100));
+            var condenserPumpSpeedPid = new PID(0.75, 0.1, 0, await GetVariableAsync<float>("CONDENSER_CIRCULATION_PUMP_ORDERED_SPEED"), true, (0, 100));
 
             const float desiredCondenserLevelMin = 200_000f;
             const float desiredCondenserLevelMax = 250_000f;
