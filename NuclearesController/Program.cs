@@ -37,7 +37,7 @@ internal class Program {
     public static void Warn(string msg) => Log(msg, LogLevel.Warning);
     public static void Error(string msg) => Log(msg, LogLevel.Error);
 
-    private static Dictionary<string, string> rawVarCache = [];
+    private static ConcurrentDictionary<string, string> rawVarCache = [];
     public static async Task<string> GetVariableRawAsync(string varname) {
     retry:
         try {
