@@ -6,15 +6,20 @@ namespace NuclearesController;
 
 internal class Program {
     private const int PORT = 8785;
-    private static readonly TimeSpan requestTimeout = TimeSpan.FromSeconds(2);
-    private static readonly HttpClient hc = new HttpClient() { BaseAddress = new($"http://localhost:{PORT}"), Timeout = requestTimeout };
-    private static readonly object logObj = new();
+    private static readonly Uri requestUrl = new($"http://localhost:{PORT}");
+    private const float desiredCoreTempNormalMode = 340f;
+    private const float desiredCoreTempMaximumMode = 525f;
+    private const float desiredCondenserTemp = 65f;
+    private const float minRodDeltaForUpdate = 0.05f; // the minimum change in desired position required to trigger a set-rod-action
 
     private const int factorModelNeededObs = 10;
-    private const float desiredCoreTemp = 340f;
-    private const float desiredCondenserTemp = 65f;
     private const double maxTargetReactivity = 1;
     private const double reactivitySlopeLengthDegrees = 25;
+    private static readonly TimeSpan requestTimeout = TimeSpan.FromSeconds(2);
+
+    private static readonly HttpClient hc = new HttpClient() { BaseAddress = requestUrl, Timeout = requestTimeout };
+    private static readonly object logObj = new();
+
     public static void Log(string msg, LogLevel level) {
         lock (logObj) {
             var fg = Console.ForegroundColor;
@@ -165,6 +170,7 @@ internal class Program {
             ControlMode lastControlMode = controlMode;
 
             double[] reactivityModelX = Array.Empty<double>();
+            double lastSetRodposML = -1;
             while (true) {
                 await WaitForNextTimeStepAsync();
                 prefetchCache = [.. varCache.Keys];
@@ -182,12 +188,17 @@ internal class Program {
                     currOpMode = coreTempCurrent > 100 ? OPMode.Normal : OPMode.Startup;
                 var opModeIsShutdown = currOpMode == OPMode.Shutdown;
 
+                var desiredCoreTemp = opModeSelStr == "MAXIMUM" ? desiredCoreTempMaximumMode : desiredCoreTempNormalMode;
+
+
+
                 if (coreFactorModel.ObservationCount >= factorModelNeededObs) {
                     controlMode = ControlMode.ML;
                 }
 
-                if (coreTempCurrent < desiredCoreTemp - 100) {
+                if (coreTempCurrent < desiredCoreTemp - 50) {
                     controlMode = ControlMode.PID;
+                    coreFactorModel.Reset();
                 }
 
                 if (lastOpMode != currOpMode) {
@@ -228,7 +239,10 @@ internal class Program {
                     case ControlMode.ML:
                         var newDesiredThermal = tempToThermalPid.Step(currentTimestamp, desiredCoreTemp, coreTempCurrent); // could add thermal surplus as delta potentially
                         mlEstimatedRodsPos = coreFactorModel.ReverseSolveForX1(newDesiredThermal, reactivityModelX[1..]);
-                        SetVariable("RODS_ALL_POS_ORDERED", mlEstimatedRodsPos);
+                        if (Math.Abs(lastSetRodposML - mlEstimatedRodsPos.Value) > minRodDeltaForUpdate)
+                            SetVariable("RODS_ALL_POS_ORDERED", mlEstimatedRodsPos);
+
+                        lastSetRodposML = mlEstimatedRodsPos.Value;
                         break;
                 }
 
@@ -265,22 +279,22 @@ internal class Program {
                 Console.SetCursorPosition(0, 0);
                 Console.WriteLine("");
                 Console.WriteLine("Cool reactor controller :)))))\n");
-                Console.WriteLine($"OPERATION MODE: {opModeSelStr} --> {currOpMode.ToString().ToUpperInvariant()}          ");
+                Console.WriteLine($"OPERATION MODE: {opModeSelStr} --> {currOpMode.ToString().ToUpperInvariant()} --> Temp target: {(currOpMode is OPMode.Shutdown or OPMode.Startup ? "Uncontrolled" : desiredCoreTemp)}" + padright + padright);
                 Console.ForegroundColor = controlMode == ControlMode.ML ? ConsoleColor.Cyan : ConsoleColor.Yellow;
                 Console.WriteLine($"CONTROL MODE: {controlMode}            ");
                 Console.ForegroundColor = origConsoleColor;
                 Console.WriteLine($"Desired/actual reactivity: {desiredReactivity:N3}/{reactivityzerobased:N3}");
-                if (variablesToSet.ContainsKey("RODS_ALL_POS_ORDERED")) {
-                    Console.WriteLine($"New rod level: {variablesToSet["RODS_ALL_POS_ORDERED"]}" + padright);
+                if (variablesToSet.TryGetValue("RODS_ALL_POS_ORDERED", out var val)) {
+                    Console.WriteLine($"New rod level: {val}" + padright);
                     //if (actualDesiredCoreTempReactivityLimited) {
                     //    Warn("Large reactivity change detected. Slowing rod movement.");
                     //}
                 } else {
                     Console.WriteLine();
                 }
-                    /*Console.WriteLine($"Ordered secondary pumpspeeds A/B/C: {string.Join('/', Enumerable.Range(0, 3).Select(i => variablesToSet[$"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED"]))}" + "      ");
-                    Console.WriteLine($"Ordered condenser speed: {variablesToSet["CONDENSER_CIRCULATION_PUMP_ORDERED_SPEED"]}" + padright);*/
-                    Console.WriteLine($"Additional variables:{padright}\n" + dictToString(observedVariables.ToDictionary(x => x, x => GetVariableAsync<float>(x).Result)));
+                /*Console.WriteLine($"Ordered secondary pumpspeeds A/B/C: {string.Join('/', Enumerable.Range(0, 3).Select(i => variablesToSet[$"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED"]))}" + "      ");
+                Console.WriteLine($"Ordered condenser speed: {variablesToSet["CONDENSER_CIRCULATION_PUMP_ORDERED_SPEED"]}" + padright);*/
+                Console.WriteLine($"Additional variables:{padright}\n" + dictToString(observedVariables.ToDictionary(x => x, x => GetVariableAsync<float>(x).Result)));
                 Console.WriteLine(padright + padright + padright);
                 var ctReached = Math.Abs(coreTempCurrent - desiredCoreTemp) < 1 && Math.Abs(reactivityzerobased) < 0.5;
                 Console.ForegroundColor = ctReached ? ConsoleColor.Green : ConsoleColor.Yellow;
@@ -288,7 +302,7 @@ internal class Program {
                 Console.ForegroundColor = origConsoleColor;
                 Console.WriteLine("Observed variable deltas:\n" + dictToString(deltaDict.ToDictionary(x => "\u0394" + x.Key, x => x.Value)));
                 Console.WriteLine(padright + padright + padright);
-                Console.WriteLine($"ML Factor fit r²: {r2_coreFactor}; Observation count: {coreFactorModel.ObservationCount}/{coreFactorModel.MaxObservationCount}"+padright);
+                Console.WriteLine($"ML Factor fit r²: {r2_coreFactor}; Observation count: {coreFactorModel.ObservationCount}/{coreFactorModel.MaxObservationCount}" + padright);
                 Console.WriteLine($"ML Factor estimate: {estimatedCurrentCoreFactor}, actual: {coreFactorOld}; Params: {coreFactorModel.KPs.Select(x => x.ToString()).JoinByDelim(" ")}" + padright);
                 Console.WriteLine($"ML Ideal rod pos estimate: {(mlEstimatedRodsPos == null ? ($"NONE - Warming Up: {coreFactorModel.ObservationCount}/{factorModelNeededObs}") : ($"{mlEstimatedRodsPos:N2}"))}" + padright);
                 Console.WriteLine(padright + padright + padright);

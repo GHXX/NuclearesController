@@ -12,6 +12,7 @@ internal class MlPlantModel(int inputCount) {
     private readonly List<Observation> observations = new(replayBufferLen);
     //private readonly double[] iPs = new double[inputCount];
 
+    public void Reset() => observations.Clear();
 
     public double ReFit() {
         // fit [[inputs]] @ [kPs] = [outputNextTick] + [slack], minimizing slack
