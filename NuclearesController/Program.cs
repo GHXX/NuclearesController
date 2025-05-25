@@ -186,6 +186,10 @@ internal class Program {
                     controlMode = ControlMode.ML;
                 }
 
+                if (coreTempCurrent < desiredCoreTemp - 100) {
+                    controlMode = ControlMode.PID;
+                }
+
                 if (lastOpMode != currOpMode) {
                     reactivityToRodsPid.Reset(await GetVariableAsync<float>("RODS_POS_ACTUAL"));
                 }
