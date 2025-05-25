@@ -37,7 +37,7 @@ internal class Program {
     public static void Warn(string msg) => Log(msg, LogLevel.Warning);
     public static void Error(string msg) => Log(msg, LogLevel.Error);
 
-    private static ConcurrentDictionary<string, string> rawVarCache = [];
+    private static readonly ConcurrentDictionary<string, string> rawVarCache = [];
     public static async Task<string> GetVariableRawAsync(string varname) {
     retry:
         try {
@@ -106,7 +106,7 @@ internal class Program {
         try { await hc.GetStringAsync("?variable=CORE_TEMP"); } catch { Console.WriteLine("Waiting for webserver to be online..."); await Task.Delay(5000); goto retry; }
     }
 
-    private static async Task Main(string[] args) {
+    private static async Task Main() {
         var c = new CultureInfo("en-US");
         c.NumberFormat.NumberGroupSeparator = " ";
         Thread.CurrentThread.CurrentCulture = Thread.CurrentThread.CurrentCulture = c;
@@ -118,8 +118,8 @@ internal class Program {
             Console.WriteLine("Starting controller...");
             Console.Title = "Nucleares Controller";
 
-            const float absorptionCapacity = 10000;
-            const float targetPowerOutput = (absorptionCapacity / 2) * (0.75f);
+            //const float absorptionCapacity = 10000;
+            //const float targetPowerOutput = (absorptionCapacity / 2) * (0.75f);
             var coshCorrectionFactor = maxTargetReactivity / Math.Log(Math.Cosh(maxTargetReactivity));
 
             await WaitForWebserverAvailableAsync();
@@ -169,7 +169,7 @@ internal class Program {
             ControlMode controlMode = ControlMode.PID;
             ControlMode lastControlMode = controlMode;
 
-            double[] reactivityModelX = Array.Empty<double>();
+            double[] reactivityModelX = [];
             double lastSetRodposML = -1;
             while (true) {
                 await WaitForNextTimeStepAsync();
