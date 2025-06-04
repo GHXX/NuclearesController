@@ -1,31 +1,25 @@
-﻿using MathNet.Numerics.LinearRegression;
+﻿using MathNet.Numerics.LinearAlgebra;
 
 namespace NuclearesController;
 internal class IntelligentLeastSquares {
-    public static double[] LstsqWithBias(double[][] X, double[] y, double aTol = 1e-3) {
-        var goodColumns = new List<int>();
-        for (int col = 0; col < X[0].Length; col++) {
-            var otherVar = X[0][col];
-            for (int i = 1; i < X.Length; i++) {
-                if (Math.Abs(otherVar - X[i][col]) > aTol) {
-                    goodColumns.Add(col); break;
-                }
-            }
-        }
-        double[][] denseX = [.. X.Select(row => row.Where((_, colIdx) => goodColumns.Contains(colIdx)).ToArray())];
-        var coeffs = MultipleRegression.DirectMethod(denseX, y, true); // first is bias
-        int coeffSrcIdx = 1;
-        double[] rv = new double[X[0].Length];
-        for (int i = 0; i < rv.Length; i++) {
-            if (goodColumns.Contains(i))
-                rv[i] = coeffs[coeffSrcIdx++];
-        }
-        if (coeffSrcIdx != coeffs.Length)
-            throw new Exception("not all coeffs were read?");
+    public static double[] LstsqWithBias(double[][] X, double[] y, double rcond = 1e-8) {
+        X = [.. X.Select(x => (double[])[1, .. x])];
+        var svd = Matrix<double>.Build.DenseOfRowArrays(X).Svd();
+
+        var sMax = svd.S.Max(Math.Abs);
+        var goodVals = svd.S.Select((x, i) => (x, i)).Where(x => Math.Abs(x.x) / sMax > rcond).Select(x => x.i).ToArray();
+        var U = SelectColumns(svd.U, goodVals);
+        var s = svd.S.Where((x, i) => goodVals.Contains(i)).Select(x => 1 / x).ToArray();
+        var V = SelectColumns(svd.VT.Transpose(), goodVals);
+        var coeffs = V * Matrix<double>.Build.Diagonal(s) * U.Transpose() * Vector<double>.Build.DenseOfArray(y);
 
         if (coeffs.Any(x => double.IsNaN(x) || double.IsInfinity(x) || double.IsNegativeInfinity(x)))
             throw new Exception("lstsq failed");
 
-        return [.. rv.Prepend(coeffs[0])];
+        return [.. coeffs];
+    }
+
+    public static Matrix<T> SelectColumns<T>(Matrix<T> X, int[] cols) where T : struct, IEquatable<T>, IFormattable {
+        return Matrix<T>.Build.DenseOfColumnVectors(X.EnumerateColumns().Where((_, i) => cols.Contains(i)));
     }
 }
