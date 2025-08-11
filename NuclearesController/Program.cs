@@ -8,7 +8,7 @@ internal class Program {
     private const int PORT = 8785;
     private static readonly Uri requestUrl = new($"http://localhost:{PORT}");
     private const float desiredCoreTempNormalMode = 340f;
-    private const float desiredCoreTempMaximumMode = 525f;
+    private const float desiredCoreTempMaximumMode = 415f;
     private const float desiredCondenserTemp = 65f;
     private const float minRodDeltaForUpdate = 0.05f; // the minimum change in desired position required to trigger a set-rod-action
 
