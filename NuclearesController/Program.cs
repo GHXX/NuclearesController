@@ -146,10 +146,10 @@ internal class Program {
             //const float targetSteamGenTemp = 250f;
             //var primaryLevelPids = Enumerable.Range(0, 3).Select(async i => new PID(0.0005, 0.001, 0.05, await GetVariableAsync<float>($"COOLANT_CORE_CIRCULATION_PUMP_{i}_ORDERED_SPEED"), false, (0, 100))).Select(x => x.Result).ToArray();
 
-            var condenserPumpSpeedPid = new PID(0.75, 0.1, 0, await GetVariableAsync<float>("CONDENSER_CIRCULATION_PUMP_ORDERED_SPEED"), true, (0, 100));
+            //var condenserPumpSpeedPid = new PID(0.75, 0.1, 0, await GetVariableAsync<float>("CONDENSER_CIRCULATION_PUMP_ORDERED_SPEED"), true, (0, 100));
 
-            const float desiredCondenserLevelMin = 200_000f;
-            const float desiredCondenserLevelMax = 250_000f;
+            //const float desiredCondenserLevelMin = 200_000f;
+            //const float desiredCondenserLevelMax = 250_000f;
 
             async Task<Dictionary<string, float>> GetDeltaPrecursorDictAsync() {
                 var rv = new ConcurrentDictionary<string, float>();
@@ -253,17 +253,17 @@ internal class Program {
                     SetVariable($"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED", secondaryLevelPids[i].Step(currentTimestamp, targetSecondaryLevel, currSecCoolant).ToString("N2"));
                 }
 
-                var condenserTempCurrent = await GetVariableAsync<float>("CONDENSER_TEMPERATURE");
-                var newCondenserSpeed = condenserPumpSpeedPid.Step(currentTimestamp, desiredCondenserTemp, condenserTempCurrent);
-                if (currOpMode == OPMode.Normal)
-                    newCondenserSpeed = Math.Max(1, newCondenserSpeed);
-                SetVariable("CONDENSER_CIRCULATION_PUMP_ORDERED_SPEED", newCondenserSpeed.ToString("N2"));
+                //var condenserTempCurrent = await GetVariableAsync<float>("CONDENSER_TEMPERATURE");
+                //var newCondenserSpeed = condenserPumpSpeedPid.Step(currentTimestamp, desiredCondenserTemp, condenserTempCurrent);
+                //if (currOpMode == OPMode.Normal)
+                //    newCondenserSpeed = Math.Max(1, newCondenserSpeed);
+                //SetVariable("CONDENSER_CIRCULATION_PUMP_ORDERED_SPEED", newCondenserSpeed.ToString("N2"));
 
-                var condenserLevelCurrent = await GetVariableAsync<float>("CONDENSER_VOLUME");
-                if (condenserLevelCurrent < desiredCondenserLevelMin)
-                    SetVariable("FREIGHT_PUMP_CONDENSER_ACTIVE", true);
-                else if (condenserLevelCurrent > desiredCondenserLevelMax)
-                    SetVariable("FREIGHT_PUMP_CONDENSER_ACTIVE", false);
+                //var condenserLevelCurrent = await GetVariableAsync<float>("CONDENSER_VOLUME");
+                //if (condenserLevelCurrent < desiredCondenserLevelMin)
+                //    SetVariable("FREIGHT_PUMP_CONDENSER_ACTIVE", true);
+                //else if (condenserLevelCurrent > desiredCondenserLevelMax)
+                //    SetVariable("FREIGHT_PUMP_CONDENSER_ACTIVE", false);
 
 
                 if (currOpMode is OPMode.Shutdown or OPMode.Startup) {
