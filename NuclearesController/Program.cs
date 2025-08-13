@@ -28,11 +28,17 @@ internal class Program {
         lock (logObj) {
             if(color != null)
                 Console.ForegroundColor = color.Value;
-            var lines = msg.Split('\n');
+            var lines = msg.Split('\n', StringSplitOptions.None);
             foreach (var line in lines) {
                 Console.Write(line);
-                var (left, _) = Console.GetCursorPosition();
-                Console.Write(new string(' ', Console.BufferWidth - left - 1) + "\n");
+                var (left, top) = Console.GetCursorPosition();
+                Console.Write(new string(' ', Console.BufferWidth - left));
+                var (left2, top2) = Console.GetCursorPosition();
+                if (left2 != Console.BufferWidth - 1) {
+                    Console.Write("\n");
+                } else {
+                    //Console.WriteLine("test");
+                }
             }
             Console.ForegroundColor = defaultForegroundColor;
         }
