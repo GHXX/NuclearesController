@@ -51,7 +51,7 @@ internal class Program {
     }
 
     public static ConcurrentBag<string> prefetchCache = [];
-    public static Dictionary<string, object> varCache = [];
+    public static ConcurrentDictionary<string, object> varCache = [];
     public static async Task<T> GetVariableAsync<T>(string varname) where T : IParsable<T> {
         if (!varname.Equals("TIME_STAMP", StringComparison.InvariantCultureIgnoreCase) && varCache.TryGetValue(varname, out var rv))
             return (T)rv;
