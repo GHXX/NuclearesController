@@ -2,7 +2,7 @@
 This is a program that uses the Webserver feature of the Steam game [Nucleares](https://store.steampowered.com/app/1428420/Nucleares/) to steer the in-game reactor.
 
 ## Current features
-Currently this program is able to steer the control rods and the condenser cooling pump (D1).
+Currently this program is able to steer the control rods and the condenser vacuum retention tank level (via the operational motive steam inlet valve).
 
 # How to set up
 This is a program written in C#. There is no pre-compiled binary available, due to the fact that I do not know what OS you will be running this on. 

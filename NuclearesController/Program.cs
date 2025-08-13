@@ -11,6 +11,7 @@ internal class Program {
     private const float desiredCoreTempMaximumMode = 415f;
     private const float desiredCondenserTemp = 65f;
     private const float minRodDeltaForUpdate = 0.05f; // the minimum change in desired position required to trigger a set-rod-action
+    private const float condenserRetentionTankDesiredFilllevel = 40_000 * 0.5f;
 
     private const int factorModelNeededObs = 10;
     private const double maxTargetReactivity = 1;
@@ -143,6 +144,8 @@ internal class Program {
             const float targetSecondaryLevel = 35000f;
             var secondaryLevelPids = Enumerable.Range(0, 3).Select(async i => new PID(0.005, 0.00005, 0, await GetVariableAsync<float>($"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED"), false, (0, 100))).Select(x => x.Result).ToArray();
 
+            var condenserRetentionTankPid = new PID(0.005, 0.00005, 0, await GetVariableAsync<float>("STEAM_EJECTOR_OPERATIONAL_MOTIVE_VALVE_ORDERED"), false, (0, 100));
+
             //const float targetSteamGenTemp = 250f;
             //var primaryLevelPids = Enumerable.Range(0, 3).Select(async i => new PID(0.0005, 0.001, 0.05, await GetVariableAsync<float>($"COOLANT_CORE_CIRCULATION_PUMP_{i}_ORDERED_SPEED"), false, (0, 100))).Select(x => x.Result).ToArray();
 
@@ -253,6 +256,15 @@ internal class Program {
                     SetVariable($"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED", secondaryLevelPids[i].Step(currentTimestamp, targetSecondaryLevel, currSecCoolant).ToString("N2"));
                 }
 
+                #region Condenser
+                if (currOpMode == OPMode.Normal) {
+                    var condenserRetentionTankFillLevelCurrent = await GetVariableAsync<float>("VACUUM_RETENTION_TANK_VOLUME");
+                    var newOpValveOrdered = condenserRetentionTankPid.Step(currentTimestamp, condenserRetentionTankDesiredFilllevel, condenserRetentionTankFillLevelCurrent);
+                    SetVariable("STEAM_EJECTOR_OPERATIONAL_MOTIVE_VALVE", Math.Clamp(newOpValveOrdered, 0, 100).ToString("N2"));
+                }
+
+
+                #endregion
                 //var condenserTempCurrent = await GetVariableAsync<float>("CONDENSER_TEMPERATURE");
                 //var newCondenserSpeed = condenserPumpSpeedPid.Step(currentTimestamp, desiredCondenserTemp, condenserTempCurrent);
                 //if (currOpMode == OPMode.Normal)
