@@ -14,6 +14,7 @@ internal class Program {
     private const float condenserRetentionTankDesiredFilllevel = 40_000 * 0.5f;
     private const float desiredCondenserLevelMin = 160_000f;
     private const float desiredCondenserLevelMax = 200_000f;
+    private const ConsoleColor defaultForegroundColor = ConsoleColor.Gray;
 
     private const int factorModelNeededObs = 10;
     private const double maxTargetReactivity = 1;
@@ -23,22 +24,19 @@ internal class Program {
     private static readonly HttpClient hc = new HttpClient() { BaseAddress = requestUrl, Timeout = requestTimeout };
     private static readonly object logObj = new();
 
-    public static void Log(string msg, LogLevel level) {
+    public static void Print(string msg, ConsoleColor? color = null) {
         lock (logObj) {
-            var fg = Console.ForegroundColor;
-            Console.ForegroundColor = level switch {
-                LogLevel.Info => ConsoleColor.White,
-                LogLevel.Warning => ConsoleColor.Yellow,
-                LogLevel.Error => ConsoleColor.Red,
-                _ => throw new NotImplementedException(),
-            };
-            Console.WriteLine(msg);
-            Console.ForegroundColor = fg;
+            if(color != null)
+                Console.ForegroundColor = color.Value;
+            var lines = msg.Split('\n');
+            foreach (var line in lines) {
+                Console.Write(line);
+                var (left, _) = Console.GetCursorPosition();
+                Console.Write(new string(' ', Console.BufferWidth - left - 1) + "\n");
+            }
+            Console.ForegroundColor = defaultForegroundColor;
         }
     }
-    public static void Info(string msg) => Log(msg, LogLevel.Info);
-    public static void Warn(string msg) => Log(msg, LogLevel.Warning);
-    public static void Error(string msg) => Log(msg, LogLevel.Error);
 
     private static readonly ConcurrentDictionary<string, string> rawVarCache = [];
     public static async Task<string> GetVariableRawAsync(string varname) {
@@ -113,12 +111,12 @@ internal class Program {
         var c = new CultureInfo("en-US");
         c.NumberFormat.NumberGroupSeparator = " ";
         Thread.CurrentThread.CurrentCulture = Thread.CurrentThread.CurrentCulture = c;
-        var origConsoleColor = Console.ForegroundColor;
         Console.OutputEncoding = Encoding.Default;
 
     restart:
         try {
-            Console.WriteLine("Starting controller...");
+
+            Print("Starting controller...");
             Console.Title = "Nucleares Controller";
 
             //const float absorptionCapacity = 10000;
@@ -289,39 +287,33 @@ internal class Program {
                 }
 
                 Console.SetCursorPosition(0, 0);
-                Console.WriteLine("");
-                Console.WriteLine("Cool reactor controller :)))))\n");
-                Console.WriteLine($"OPERATION MODE: {opModeSelStr} --> {currOpMode.ToString().ToUpperInvariant()} --> Temp target: {(currOpMode is OPMode.Shutdown or OPMode.Startup ? "Uncontrolled" : desiredCoreTemp)}" + padright + padright);
-                Console.ForegroundColor = controlMode == ControlMode.ML ? ConsoleColor.Cyan : ConsoleColor.Yellow;
-                Console.WriteLine($"CONTROL MODE: {controlMode}            ");
-                Console.ForegroundColor = origConsoleColor;
-                Console.WriteLine($"Desired/actual reactivity: {desiredReactivity:N3}/{reactivityzerobased:N3}");
+                Print("\nCool reactor controller :)))))\n");
+                Print($"OPERATION MODE: {opModeSelStr} --> {currOpMode.ToString().ToUpperInvariant()} --> Temp target: {(currOpMode is OPMode.Shutdown or OPMode.Startup ? "Uncontrolled" : desiredCoreTemp)}" + padright + padright);
+                Print($"CONTROL MODE: {controlMode}", controlMode switch { ControlMode.ML => ConsoleColor.Cyan, _ => ConsoleColor.Yellow });
+                Print($"Desired/actual reactivity: {desiredReactivity:N3}/{reactivityzerobased:N3}");
                 if (variablesToSet.TryGetValue("RODS_ALL_POS_ORDERED", out var val)) {
-                    Console.WriteLine($"New rod level: {val}" + padright);
+                    Print($"New rod level: {val}" + padright);
                     //if (actualDesiredCoreTempReactivityLimited) {
                     //    Warn("Large reactivity change detected. Slowing rod movement.");
                     //}
                 } else {
-                    Console.WriteLine();
+                    Print("");
                 }
                 /*Console.WriteLine($"Ordered secondary pumpspeeds A/B/C: {string.Join('/', Enumerable.Range(0, 3).Select(i => variablesToSet[$"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED"]))}" + "      ");
                 Console.WriteLine($"Ordered condenser speed: {variablesToSet["CONDENSER_CIRCULATION_PUMP_ORDERED_SPEED"]}" + padright);*/
-                Console.WriteLine($"Additional variables:{padright}\n" + dictToString(observedVariables.ToDictionary(x => x, x => GetVariableAsync<float>(x).Result)));
-                Console.WriteLine(padright + padright + padright);
+                Print($"Additional variables:{padright}\n" + dictToString(observedVariables.ToDictionary(x => x, x => GetVariableAsync<float>(x).Result)));
+
                 var ctReached = Math.Abs(coreTempCurrent - desiredCoreTemp) < 1 && Math.Abs(reactivityzerobased) < 0.5;
-                Console.ForegroundColor = ctReached ? ConsoleColor.Green : ConsoleColor.Yellow;
-                Console.WriteLine($"CORE TEMP REACHED? {ctReached} ");
-                Console.ForegroundColor = origConsoleColor;
-                Console.WriteLine("Observed variable deltas:\n" + dictToString(deltaDict.ToDictionary(x => "\u0394" + x.Key, x => x.Value)));
-                Console.WriteLine(padright + padright + padright);
-                Console.WriteLine($"ML Factor fit r²: {r2_coreFactor}; Observation count: {coreFactorModel.ObservationCount}/{coreFactorModel.MaxObservationCount}" + padright);
-                Console.WriteLine($"ML Factor estimate: {estimatedCurrentCoreFactor}, actual: {coreFactorOld}; Params: {coreFactorModel.KPs.Select(x => x.ToString()).JoinByDelim(" ")}" + padright);
-                Console.WriteLine($"ML Ideal rod pos estimate: {(mlEstimatedRodsPos == null ? ($"NONE - Warming Up: {coreFactorModel.ObservationCount}/{factorModelNeededObs}") : ($"{mlEstimatedRodsPos:N2}"))}" + padright);
-                Console.WriteLine(padright + padright + padright);
+                Print($"\nCORE TEMP REACHED? {ctReached}", ctReached ? ConsoleColor.Green : ConsoleColor.Yellow);
+                Print("Observed variable deltas:\n" + dictToString(deltaDict.ToDictionary(x => "\u0394" + x.Key, x => x.Value)));
+
+                Print($"\nML Factor fit r²: {r2_coreFactor}; Observation count: {coreFactorModel.ObservationCount}/{coreFactorModel.MaxObservationCount}");
+                Print($"ML Factor estimate: {estimatedCurrentCoreFactor}, actual: {coreFactorOld}; Params: {coreFactorModel.KPs.Select(x => x.ToString()).JoinByDelim(" ")}");
+                Print($"ML Ideal rod pos estimate: {(mlEstimatedRodsPos == null ? ($"NONE - Warming Up: {coreFactorModel.ObservationCount}/{factorModelNeededObs}") : ($"{mlEstimatedRodsPos:N2}"))}");
                 //Console.WriteLine("Excel paste string:\n" + variablesToPaste.Select(x => GetVariableAsync<float>(x).Result.ToString().Replace(",", "").Replace('.', ',') + " ").JoinByDelim(" ") + padright);
-                Console.WriteLine(padright + padright + padright);
-                Console.WriteLine(padright + padright + padright);
-                Console.WriteLine(padright + padright + padright);
+                var (cursorPosLeft, cursorPosTop) = Console.GetCursorPosition();
+                var cursorPosIdx = cursorPosTop * Console.BufferWidth + cursorPosLeft;
+                Console.Write(new string(' ', Console.BufferWidth * Console.WindowHeight - cursorPosIdx));
                 Console.SetCursorPosition(0, 0);
 
                 string dictToString(Dictionary<string, float> d) => d.Select(x => $"{x.Key.PadRight(d.Max(x => x.Key.Length) + 1)} {x.Value,11:N5}").JoinByDelim("\n");
