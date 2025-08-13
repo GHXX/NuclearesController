@@ -12,6 +12,8 @@ internal class Program {
     private const float desiredCondenserTemp = 65f;
     private const float minRodDeltaForUpdate = 0.05f; // the minimum change in desired position required to trigger a set-rod-action
     private const float condenserRetentionTankDesiredFilllevel = 40_000 * 0.5f;
+    private const float desiredCondenserLevelMin = 160_000f;
+    private const float desiredCondenserLevelMax = 200_000f;
 
     private const int factorModelNeededObs = 10;
     private const double maxTargetReactivity = 1;
@@ -151,8 +153,6 @@ internal class Program {
 
             //var condenserPumpSpeedPid = new PID(0.75, 0.1, 0, await GetVariableAsync<float>("CONDENSER_CIRCULATION_PUMP_ORDERED_SPEED"), true, (0, 100));
 
-            //const float desiredCondenserLevelMin = 200_000f;
-            //const float desiredCondenserLevelMax = 250_000f;
 
             async Task<Dictionary<string, float>> GetDeltaPrecursorDictAsync() {
                 var rv = new ConcurrentDictionary<string, float>();
@@ -271,11 +271,11 @@ internal class Program {
                 //    newCondenserSpeed = Math.Max(1, newCondenserSpeed);
                 //SetVariable("CONDENSER_CIRCULATION_PUMP_ORDERED_SPEED", newCondenserSpeed.ToString("N2"));
 
-                //var condenserLevelCurrent = await GetVariableAsync<float>("CONDENSER_VOLUME");
-                //if (condenserLevelCurrent < desiredCondenserLevelMin)
-                //    SetVariable("FREIGHT_PUMP_CONDENSER_ACTIVE", true);
-                //else if (condenserLevelCurrent > desiredCondenserLevelMax)
-                //    SetVariable("FREIGHT_PUMP_CONDENSER_ACTIVE", false);
+                var condenserLevelCurrent = await GetVariableAsync<float>("CONDENSER_VOLUME");
+                if (condenserLevelCurrent < desiredCondenserLevelMin)
+                    SetVariable("FREIGHT_PUMP_CONDENSER_SWITCH", true);
+                else if (condenserLevelCurrent > desiredCondenserLevelMax)
+                    SetVariable("FREIGHT_PUMP_CONDENSER_SWITCH", false);
 
 
                 if (currOpMode is OPMode.Shutdown or OPMode.Startup) {
