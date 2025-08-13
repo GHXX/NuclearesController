@@ -314,7 +314,7 @@ internal class Program {
                 Print("Observed variable deltas:\n" + dictToString(deltaDict.ToDictionary(x => "\u0394" + x.Key, x => x.Value)));
 
                 Print($"\nML Factor fit r²: {r2_coreFactor}; Observation count: {coreFactorModel.ObservationCount}/{coreFactorModel.MaxObservationCount}");
-                Print($"ML Factor estimate: {estimatedCurrentCoreFactor}, actual: {coreFactorOld}; Params: {coreFactorModel.KPs.Select(x => x.ToString()).JoinByDelim(" ")}");
+                Print($"ML Factor estimate: {estimatedCurrentCoreFactor}, actual: {coreFactorOld}; Params: {coreFactorModel.KPs.Select(x => x < 1e-10 ? "0" : x.ToString()).JoinByDelim(" ")}");
                 Print($"ML Ideal rod pos estimate: {(mlEstimatedRodsPos == null ? ($"NONE - Warming Up: {coreFactorModel.ObservationCount}/{factorModelNeededObs}") : ($"{mlEstimatedRodsPos:N2}"))}");
                 //Console.WriteLine("Excel paste string:\n" + variablesToPaste.Select(x => GetVariableAsync<float>(x).Result.ToString().Replace(",", "").Replace('.', ',') + " ").JoinByDelim(" ") + padright);
                 var (cursorPosLeft, cursorPosTop) = Console.GetCursorPosition();
