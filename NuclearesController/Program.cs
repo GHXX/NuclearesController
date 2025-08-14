@@ -113,7 +113,10 @@ internal class Program {
         Thread.CurrentThread.CurrentCulture = Thread.CurrentThread.CurrentCulture = c;
         Console.OutputEncoding = Encoding.Default;
 
-        BaseController[] modules = [new CoreController(), new CondenserController()];
+        BaseController[] modules = typeof(Program).Assembly.GetTypes()
+            .Where(x => x.IsAssignableTo(typeof(BaseController)) && x != typeof(BaseController))
+            .Select(x => (BaseController)Activator.CreateInstance(x)!).Where(x => x != null)
+            .ToArray();
     restart:
         try {
 
@@ -167,14 +170,17 @@ internal class Program {
                 Console.SetCursorPosition(0, 0);
                 Print("\nCool reactor controller :)))))\n");
                 foreach (var m in modules) {
+                    Print($"========== {m.GetType().Name} is active ==========");
                     foreach (var msg in m.GetMessagesToPrint()) {
                         Print(msg.Item1, msg.Item2);
                     }
+                    Print("\n");
                     foreach (var kv in m.variablesToSet) {
                         variablesToSet.Add(kv.Key, kv.Value);
                     }
                 }
 
+                Print($"========== Extra Info ==========");
                 Print($"Additional variables:\n" + Util.DictToString(observedVariables.ToDictionary(x => x, x => GetVariableAsync<float>(x).Result)));
                 Print("Observed variable deltas:\n" + Util.DictToString(deltaDict.ToDictionary(x => "\u0394" + x.Key, x => x.Value)));
                 /*Console.WriteLine($"Ordered secondary pumpspeeds A/B/C: {string.Join('/', Enumerable.Range(0, 3).Select(i => variablesToSet[$"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED"]))}" + "      ");
