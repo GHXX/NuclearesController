@@ -16,7 +16,6 @@ internal abstract class BaseController {
 
 
     protected static async Task<T> GetVariableAsync<T>(string varname) where T : IParsable<T> => await Program.GetVariableAsync<T>(varname);
-    protected static async Task SetVariableAsync(string varname, object value) => await Program.SetVariableAsync(varname, value);
 
 
     protected void Print(string msg, ConsoleColor c = Program.defaultForegroundColor) => this.infoTexts.Add((msg, c));
