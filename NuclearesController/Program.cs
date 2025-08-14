@@ -183,7 +183,9 @@ internal class Program {
 
                 var (cursorPosLeft, cursorPosTop) = Console.GetCursorPosition();
                 var cursorPosIdx = cursorPosTop * Console.BufferWidth + cursorPosLeft;
-                Console.Write(new string(' ', Console.BufferWidth * Console.WindowHeight - cursorPosIdx));
+                int padLen = Console.BufferWidth * Console.WindowHeight - cursorPosIdx;
+                if (padLen > 0)
+                    Console.Write(new string(' ', padLen));
                 Console.SetCursorPosition(0, 0);
 
                 foreach (var (k, v) in variablesToSet) {
