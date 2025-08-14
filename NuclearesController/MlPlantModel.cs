@@ -12,7 +12,7 @@ internal class MlPlantModel(int inputCount) {
     private readonly List<Observation> observations = new(replayBufferLen);
     //private readonly double[] iPs = new double[inputCount];
 
-    public void Reset() => observations.Clear();
+    public void Reset() => this.observations.Clear();
 
     public double ReFit() {
         // fit [[inputs]] @ [kPs] = [outputNextTick] + [slack], minimizing slack
@@ -30,7 +30,7 @@ internal class MlPlantModel(int inputCount) {
     }
 
     public double ReverseSolveForX1(double desiredOutput, double[] remainingObservations) {
-        return (desiredOutput - (Vector<double>.Build.DenseOfArray(remainingObservations).DotProduct(Vector<double>.Build.DenseOfArray(this.kPs[2..])) + this.kPs[0])) / this.KPs[1];
+        return (desiredOutput - (Vector<double>.Build.DenseOfArray(remainingObservations).DotProduct(Vector<double>.Build.DenseOfArray(this.kPs[2..])) + this.kPs[0])) / KPs[1];
     }
 
     public double Evaluate(double[] x) => x.Dot(this.kPs[1..]) + this.kPs[0];

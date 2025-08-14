@@ -1,6 +1,7 @@
 ﻿namespace NuclearesController;
 
 internal enum ControlMode {
-    PID,
-    ML
+    Shutdown,
+    Startup,
+    Normal
 }

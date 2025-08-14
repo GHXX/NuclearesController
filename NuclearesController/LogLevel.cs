@@ -1,7 +1,6 @@
 ﻿namespace NuclearesController;
 
-public enum LogLevel
-{
+public enum LogLevel {
     Info,
     Warning,
     Error

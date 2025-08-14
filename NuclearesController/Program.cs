@@ -1,4 +1,5 @@
-﻿using System.Collections.Concurrent;
+﻿using NuclearesController.Controllers;
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
 
@@ -7,18 +8,11 @@ namespace NuclearesController;
 internal class Program {
     private const int PORT = 8785;
     private static readonly Uri requestUrl = new($"http://localhost:{PORT}");
-    private const float desiredCoreTempNormalMode = 340f;
-    private const float desiredCoreTempMaximumMode = 415f;
-    private const float desiredCondenserTemp = 65f;
-    private const float minRodDeltaForUpdate = 0.05f; // the minimum change in desired position required to trigger a set-rod-action
-    private const float condenserRetentionTankDesiredFilllevel = 40_000 * 0.5f;
-    private const float desiredCondenserLevelMin = 160_000f;
-    private const float desiredCondenserLevelMax = 200_000f;
-    private const ConsoleColor defaultForegroundColor = ConsoleColor.Gray;
+    public const ConsoleColor defaultForegroundColor = ConsoleColor.Gray;
+    public static ControlMode currOpMode;
+    public static ControlMode lastOpMode;
 
-    private const int factorModelNeededObs = 10;
-    private const double maxTargetReactivity = 1;
-    private const double reactivitySlopeLengthDegrees = 25;
+
     private static readonly TimeSpan requestTimeout = TimeSpan.FromSeconds(2);
 
     private static readonly HttpClient hc = new HttpClient() { BaseAddress = requestUrl, Timeout = requestTimeout };
@@ -26,7 +20,7 @@ internal class Program {
 
     public static void Print(string msg, ConsoleColor? color = null) {
         lock (logObj) {
-            if(color != null)
+            if (color != null)
                 Console.ForegroundColor = color.Value;
             var lines = msg.Split('\n', StringSplitOptions.None);
             foreach (var line in lines) {
@@ -90,7 +84,7 @@ internal class Program {
         }
     }
 
-    private static int currentTimestamp = 0;
+    public static int currentTimestamp = 0;
     internal static readonly string[] generatorVariables = [.. Enumerable.Range(0, 3).Select(x => $"GENERATOR_{x}_KW")];
     internal static readonly string[] secLevelVariables = [.. Enumerable.Range(0, 3).Select(x => $"COOLANT_SEC_{x}_VOLUME")];
     internal static readonly string[] primaryPumpSpeedVariables = [.. Enumerable.Range(0, 3).Select(x => $"COOLANT_CORE_CIRCULATION_PUMP_{x}_SPEED")];
@@ -119,65 +113,33 @@ internal class Program {
         Thread.CurrentThread.CurrentCulture = Thread.CurrentThread.CurrentCulture = c;
         Console.OutputEncoding = Encoding.Default;
 
+        BaseController[] modules = [new CoreController(), new CondenserController()];
     restart:
         try {
 
             Print("Starting controller...");
             Console.Title = "Nucleares Controller";
-
-            //const float absorptionCapacity = 10000;
-            //const float targetPowerOutput = (absorptionCapacity / 2) * (0.75f);
-            var coshCorrectionFactor = maxTargetReactivity / Math.Log(Math.Cosh(maxTargetReactivity));
-
             await WaitForWebserverAvailableAsync();
             Console.Clear();
 
-
-
             var variablesToSet = new Dictionary<string, string>();
-            void SetVariable(string name, object value) => variablesToSet[name] = value.ToString()!;
-
-            string padright = new string(' ', 32);
-
-            double targetCoreTemp = await GetVariableAsync<float>("CORE_TEMP");
-            double rodStartPercentage = await GetVariableAsync<float>("RODS_POS_ACTUAL");
-            var reactivityToRodsPid = new PID(1.5, 0.1 / 4, 0, rodStartPercentage, true, (0, 100));
-            var tempToThermalPid = new PID(0.075, 0.01, 0, 0, false, null);
-
-            string[] coreReactivityRelevantVars = ["RODS_POS_ACTUAL",/*"CORE_TEMP",*/ .. primaryPumpSpeedVariables, "CORE_IODINE_CUMULATIVE", "CORE_XENON_CUMULATIVE", "CHEM_BORON_PPM"];
-            var coreFactorModel = new MlPlantModel(coreReactivityRelevantVars.Length);
-
-            const float targetSecondaryLevel = 35000f;
-            var secondaryLevelPids = Enumerable.Range(0, 3).Select(async i => new PID(0.005, 0.00005, 0, await GetVariableAsync<float>($"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED"), false, (0, 100))).Select(x => x.Result).ToArray();
-
-            var condenserRetentionTankPid = new PID(0.005, 0.00005, 0, await GetVariableAsync<float>("STEAM_EJECTOR_OPERATIONAL_MOTIVE_VALVE_ORDERED"), false, (0, 100));
-
-            //const float targetSteamGenTemp = 250f;
-            //var primaryLevelPids = Enumerable.Range(0, 3).Select(async i => new PID(0.0005, 0.001, 0.05, await GetVariableAsync<float>($"COOLANT_CORE_CIRCULATION_PUMP_{i}_ORDERED_SPEED"), false, (0, 100))).Select(x => x.Result).ToArray();
-
-            //var condenserPumpSpeedPid = new PID(0.75, 0.1, 0, await GetVariableAsync<float>("CONDENSER_CIRCULATION_PUMP_ORDERED_SPEED"), true, (0, 100));
 
 
             async Task<Dictionary<string, float>> GetDeltaPrecursorDictAsync() {
                 var rv = new ConcurrentDictionary<string, float>();
                 await Parallel.ForEachAsync(deltaVariablesToObserve, async (x, ctok) => rv[x] = await GetVariableAsync<float>(x));
-                //foreach (var dv in deltaVariablesToObserve)
-                //    rv[dv] = await GetVariableAsync<float>(dv);
                 return rv.ToDictionary();
             }
 
+            await Task.WhenAll(modules.Select(x => x.ReInitAsync()));
             var deltaHandler = new DeltaDictHelper<float>(await GetDeltaPrecursorDictAsync());
 
             //var energyToCoreTempPid = new PID(0.00005, 0.0001, 0.02, targetCoreTemp, false, (170, 450));
             //var coreTempToRodsPid = new PID(0.01, 0.01, 0, rodStartPercentage, true, (0, 100));
-            OPMode currOpMode = OPMode.Shutdown;
-            OPMode lastOpMode = currOpMode;
+            currOpMode = ControlMode.Shutdown;
+            lastOpMode = currOpMode;
 
-            ControlMode controlMode = ControlMode.PID;
-            ControlMode lastControlMode = controlMode;
 
-            double[] reactivityModelX = [];
-            double lastSetRodposML = -1;
             while (true) {
                 await WaitForNextTimeStepAsync();
                 prefetchCache = [.. varCache.Keys];
@@ -186,143 +148,47 @@ internal class Program {
                 variablesToSet.Clear();
                 await HttpPrefetchAsync();
                 var coreTempCurrent = await GetVariableAsync<float>("CORE_TEMP");
-                var reactivityzerobased = await GetVariableAsync<float>("CORE_STATE_CRITICALITY");
-                var coreFactorOld = await GetVariableAsync<float>("CORE_FACTOR");
                 var opModeSelStr = await GetVariableAsync<string>("CORE_OPERATION_MODE");
-                if (opModeSelStr == "SHUTDOWN")
-                    currOpMode = OPMode.Shutdown;
-                else
-                    currOpMode = coreTempCurrent > 100 ? OPMode.Normal : OPMode.Startup;
-                var opModeIsShutdown = currOpMode == OPMode.Shutdown;
-
-                var desiredCoreTemp = opModeSelStr == "MAXIMUM" ? desiredCoreTempMaximumMode : desiredCoreTempNormalMode;
-
-
-
-                if (coreFactorModel.ObservationCount >= factorModelNeededObs) {
-                    controlMode = ControlMode.ML;
-                }
-
-                if (coreTempCurrent < desiredCoreTemp - 50) {
-                    controlMode = ControlMode.PID;
-                    coreFactorModel.Reset();
-                }
-
-                if (lastOpMode != currOpMode) {
-                    reactivityToRodsPid.Reset(await GetVariableAsync<float>("RODS_POS_ACTUAL"));
-                }
-                if (lastControlMode != controlMode) {
-                    switch (controlMode) {
-                        case ControlMode.PID:
-                            reactivityToRodsPid.Reset(await GetVariableAsync<float>("RODS_POS_ACTUAL"));
-                            break;
-                        case ControlMode.ML:
-                            tempToThermalPid.Reset(coreFactorOld);
-                            break;
-                    }
-                }
 
                 lastOpMode = currOpMode;
-                lastControlMode = controlMode;
+                if (opModeSelStr == "SHUTDOWN")
+                    currOpMode = ControlMode.Shutdown;
+                else
+                    currOpMode = coreTempCurrent > 100 ? ControlMode.Normal : ControlMode.Startup;
 
-                var estimatedCurrentCoreFactor = 0d;
-                var r2_coreFactor = 0d;
-                if (reactivityModelX.Length > 0) {
-                    estimatedCurrentCoreFactor = coreFactorModel.Evaluate(reactivityModelX);
-                }
-                reactivityModelX = [.. coreReactivityRelevantVars.Select(x => GetVariableAsync<float>(x).Result)]; // store for next time around
-                coreFactorModel.AddObservation(reactivityModelX, coreFactorOld); // train on current X and current core factor
-                r2_coreFactor = coreFactorModel.ReFit();
-
-                var coreTempError = coreTempCurrent - desiredCoreTemp;
-                var desiredReactivity = Math.Clamp(-coreTempError, -reactivitySlopeLengthDegrees, reactivitySlopeLengthDegrees) / reactivitySlopeLengthDegrees * maxTargetReactivity;
-                double? mlEstimatedRodsPos = null;
-                switch (controlMode) {
-                    case ControlMode.PID:
-                        var newRodsPos = reactivityToRodsPid.Step(currentTimestamp, desiredReactivity, reactivityzerobased);
-                        SetVariable("RODS_ALL_POS_ORDERED", newRodsPos);
-                        break;
-
-                    case ControlMode.ML:
-                        var newDesiredThermal = tempToThermalPid.Step(currentTimestamp, desiredCoreTemp, coreTempCurrent); // could add thermal surplus as delta potentially
-                        mlEstimatedRodsPos = coreFactorModel.ReverseSolveForX1(newDesiredThermal, reactivityModelX[1..]);
-                        if (Math.Abs(lastSetRodposML - mlEstimatedRodsPos.Value) > minRodDeltaForUpdate)
-                            SetVariable("RODS_ALL_POS_ORDERED", mlEstimatedRodsPos);
-
-                        lastSetRodposML = mlEstimatedRodsPos.Value;
-                        break;
+                if (lastOpMode != currOpMode) {
+                    await Task.WhenAll(modules.Select(x => x.NotifyControlOpModeChangedAsync(currOpMode, lastOpMode)));
                 }
 
-
-
-                for (int i = 0; i < 0; i++) {
-                    var currSecCoolant = await GetVariableAsync<float>($"COOLANT_SEC_{i}_VOLUME");
-                    SetVariable($"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED", secondaryLevelPids[i].Step(currentTimestamp, targetSecondaryLevel, currSecCoolant).ToString("N2"));
-                }
-
-                #region Condenser
-                if (currOpMode == OPMode.Normal) {
-                    var condenserRetentionTankFillLevelCurrent = await GetVariableAsync<float>("VACUUM_RETENTION_TANK_VOLUME");
-                    var newOpValveOrdered = condenserRetentionTankPid.Step(currentTimestamp, condenserRetentionTankDesiredFilllevel, condenserRetentionTankFillLevelCurrent);
-                    SetVariable("STEAM_EJECTOR_OPERATIONAL_MOTIVE_VALVE", Math.Clamp(newOpValveOrdered, 0, 100).ToString("N2"));
-                }
-
-
-                #endregion
-                //var condenserTempCurrent = await GetVariableAsync<float>("CONDENSER_TEMPERATURE");
-                //var newCondenserSpeed = condenserPumpSpeedPid.Step(currentTimestamp, desiredCondenserTemp, condenserTempCurrent);
-                //if (currOpMode == OPMode.Normal)
-                //    newCondenserSpeed = Math.Max(1, newCondenserSpeed);
-                //SetVariable("CONDENSER_CIRCULATION_PUMP_ORDERED_SPEED", newCondenserSpeed.ToString("N2"));
-
-                var condenserLevelCurrent = await GetVariableAsync<float>("CONDENSER_VOLUME");
-                if (condenserLevelCurrent < desiredCondenserLevelMin)
-                    SetVariable("FREIGHT_PUMP_CONDENSER_SWITCH", true);
-                else if (condenserLevelCurrent > desiredCondenserLevelMax)
-                    SetVariable("FREIGHT_PUMP_CONDENSER_SWITCH", false);
-
-
-                if (currOpMode is OPMode.Shutdown or OPMode.Startup) {
-                    variablesToSet.Remove("RODS_ALL_POS_ORDERED");
-                }
+                await Task.WhenAll(modules.Select(x => x.NotifyNewTimestampAsync()));
 
                 var deltaDict = deltaHandler.Tick(await GetDeltaPrecursorDictAsync());
 
-                foreach (var (k, v) in variablesToSet) {
-                    await SetVariableAsync(k, v);
-                }
-
                 Console.SetCursorPosition(0, 0);
                 Print("\nCool reactor controller :)))))\n");
-                Print($"OPERATION MODE: {opModeSelStr} --> {currOpMode.ToString().ToUpperInvariant()} --> Temp target: {(currOpMode is OPMode.Shutdown or OPMode.Startup ? "Uncontrolled" : desiredCoreTemp)}" + padright + padright);
-                Print($"CONTROL MODE: {controlMode}", controlMode switch { ControlMode.ML => ConsoleColor.Cyan, _ => ConsoleColor.Yellow });
-                Print($"Desired/actual reactivity: {desiredReactivity:N3}/{reactivityzerobased:N3}");
-                if (variablesToSet.TryGetValue("RODS_ALL_POS_ORDERED", out var val)) {
-                    Print($"New rod level: {val}" + padright);
-                    //if (actualDesiredCoreTempReactivityLimited) {
-                    //    Warn("Large reactivity change detected. Slowing rod movement.");
-                    //}
-                } else {
-                    Print("");
+                foreach (var m in modules) {
+                    foreach (var msg in m.GetMessagesToPrint()) {
+                        Print(msg.Item1, msg.Item2);
+                    }
+                    foreach (var kv in m.variablesToSet) {
+                        variablesToSet.Add(kv.Key, kv.Value);
+                    }
                 }
+
+                Print($"Additional variables:\n" + Util.DictToString(observedVariables.ToDictionary(x => x, x => GetVariableAsync<float>(x).Result)));
+                Print("Observed variable deltas:\n" + Util.DictToString(deltaDict.ToDictionary(x => "\u0394" + x.Key, x => x.Value)));
                 /*Console.WriteLine($"Ordered secondary pumpspeeds A/B/C: {string.Join('/', Enumerable.Range(0, 3).Select(i => variablesToSet[$"COOLANT_SEC_CIRCULATION_PUMP_{i}_ORDERED_SPEED"]))}" + "      ");
                 Console.WriteLine($"Ordered condenser speed: {variablesToSet["CONDENSER_CIRCULATION_PUMP_ORDERED_SPEED"]}" + padright);*/
-                Print($"Additional variables:{padright}\n" + dictToString(observedVariables.ToDictionary(x => x, x => GetVariableAsync<float>(x).Result)));
-
-                var ctReached = Math.Abs(coreTempCurrent - desiredCoreTemp) < 1 && Math.Abs(reactivityzerobased) < 0.5;
-                Print($"\nCORE TEMP REACHED? {ctReached}", ctReached ? ConsoleColor.Green : ConsoleColor.Yellow);
-                Print("Observed variable deltas:\n" + dictToString(deltaDict.ToDictionary(x => "\u0394" + x.Key, x => x.Value)));
-
-                Print($"\nML Factor fit r²: {r2_coreFactor}; Observation count: {coreFactorModel.ObservationCount}/{coreFactorModel.MaxObservationCount}");
-                Print($"ML Factor estimate: {estimatedCurrentCoreFactor}, actual: {coreFactorOld}; Params: {coreFactorModel.KPs.Select(x => x < 1e-10 ? "0" : x.ToString()).JoinByDelim(" ")}");
-                Print($"ML Ideal rod pos estimate: {(mlEstimatedRodsPos == null ? ($"NONE - Warming Up: {coreFactorModel.ObservationCount}/{factorModelNeededObs}") : ($"{mlEstimatedRodsPos:N2}"))}");
                 //Console.WriteLine("Excel paste string:\n" + variablesToPaste.Select(x => GetVariableAsync<float>(x).Result.ToString().Replace(",", "").Replace('.', ',') + " ").JoinByDelim(" ") + padright);
+
                 var (cursorPosLeft, cursorPosTop) = Console.GetCursorPosition();
                 var cursorPosIdx = cursorPosTop * Console.BufferWidth + cursorPosLeft;
                 Console.Write(new string(' ', Console.BufferWidth * Console.WindowHeight - cursorPosIdx));
                 Console.SetCursorPosition(0, 0);
 
-                string dictToString(Dictionary<string, float> d) => d.Select(x => $"{x.Key.PadRight(d.Max(x => x.Key.Length) + 1)} {x.Value,11:N5}").JoinByDelim("\n");
+                foreach (var (k, v) in variablesToSet) {
+                    await SetVariableAsync(k, v);
+                }
             }
         } catch (Exception ex) {
             Console.WriteLine(ex);
