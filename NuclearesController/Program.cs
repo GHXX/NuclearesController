@@ -178,6 +178,7 @@ internal class Program {
                     foreach (var kv in m.variablesToSet) {
                         variablesToSet.Add(kv.Key, kv.Value);
                     }
+                    m.variablesToSet.Clear();
                 }
 
                 Print($"========== Extra Info ==========");
