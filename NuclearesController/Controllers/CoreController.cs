@@ -30,13 +30,14 @@ internal class CoreController : BaseController {
         var coreFactorOld = await GetVariableAsync<float>("CORE_FACTOR");
         var opModeSelStr = await GetVariableAsync<string>("CORE_OPERATION_MODE");
         var desiredCoreTemp = opModeSelStr == "MAXIMUM" ? desiredCoreTempMaximumMode : desiredCoreTempNormalMode;
+        var rodsPosActual = await GetVariableAsync<float>("RODS_POS_ACTUAL");
 
         this.lastControlMode = this.controlMode;
         if (this.coreFactorModel.ObservationCount >= factorModelNeededObs) {
             this.controlMode = RodControlMode.ML;
         }
 
-        if (coreTempCurrent < desiredCoreTemp - 50) {
+        if (coreTempCurrent < desiredCoreTemp - 50 || rodsPosActual < 0.1) { // ML somehow not achieving target temp or poisoned reactor (rodlevel = 0)
             this.controlMode = RodControlMode.PID;
             this.coreFactorModel.Reset();
         }
@@ -44,7 +45,7 @@ internal class CoreController : BaseController {
         if (this.lastControlMode != this.controlMode) {
             switch (this.controlMode) {
                 case RodControlMode.PID:
-                    this.reactivityToRodsPid.Reset(await GetVariableAsync<float>("RODS_POS_ACTUAL"));
+                    this.reactivityToRodsPid.Reset(rodsPosActual);
                     break;
                 case RodControlMode.ML:
                     this.tempToThermalPid.Reset(coreFactorOld);
