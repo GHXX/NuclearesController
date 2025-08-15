@@ -26,9 +26,9 @@ internal class Program {
             foreach (var line in lines) {
                 Console.Write(line);
                 var (left, top) = Console.GetCursorPosition();
-                Console.Write(new string(' ', Console.BufferWidth - left));
+                Console.Write(new string(' ', Console.WindowWidth - left));
                 var (left2, top2) = Console.GetCursorPosition();
-                if (left2 != Console.BufferWidth - 1) {
+                if (left2 != Console.WindowWidth - 1) {
                     Console.Write("\n");
                 } else {
                     //Console.WriteLine("test");
@@ -142,8 +142,8 @@ internal class Program {
             currOpMode = ControlMode.Shutdown;
             lastOpMode = currOpMode;
 
-
-            while (true) {
+            int lastWindowWidth = Console.WindowWidth;
+            while (true) {                
                 await WaitForNextTimeStepAsync();
                 prefetchCache = [.. varCache.Keys];
                 rawVarCache.Clear();
@@ -167,6 +167,10 @@ internal class Program {
 
                 var deltaDict = deltaHandler.Tick(await GetDeltaPrecursorDictAsync());
 
+                if(Console.WindowWidth != lastWindowWidth) {
+                    lastWindowWidth = Console.WindowWidth;
+                    Console.Clear();
+                }
                 Console.SetCursorPosition(0, 0);
                 Print("\nCool reactor controller :)))))\n");
                 foreach (var m in modules) {
